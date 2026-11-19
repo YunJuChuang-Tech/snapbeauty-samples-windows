@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](#环境要求)
 
-本仓库提供 SnapBeauty SDK 1.3.1 的 Windows 接入示例。两个入口都使用公开的 `snapbeauty/desktop.h` C 接口。
+本仓库提供 SnapBeauty SDK 1.3.2 的 Windows 接入示例。两个入口都使用公开的 `snapbeauty/desktop.h` C 接口。
 
 | 示例 | 内容 |
 | --- | --- |
@@ -20,22 +20,22 @@
 
 ### 1. 解压 SDK
 
-从 SnapBeauty 官方渠道获取 `SnapBeauty-Windows-1.3.1.zip`。下载入口开放前，可向 SnapBeauty SDK 提供方获取 ZIP。将文件放在用户的 Downloads 目录，在仓库根目录执行以下命令。也可解压至任意目录，并用 `-SdkRoot` 或 `SNAPBEAUTY_SDK_ROOT` 指定包含 `include/`、`lib/`、`bin/`、`Assets/` 的目录。
+从 SnapBeauty 官方渠道获取 `SnapBeauty-Windows-1.3.2.zip`。下载入口开放前，可向 SnapBeauty SDK 提供方获取 ZIP。将文件放在用户的 Downloads 目录，在仓库根目录执行以下命令。也可解压至任意目录，并用 `-SdkRoot` 或 `SNAPBEAUTY_SDK_ROOT` 指定包含 `include/`、`lib/`、`bin/`、`Assets/` 的目录。
 
 ```powershell
-$zip = Join-Path $env:USERPROFILE 'Downloads/SnapBeauty-Windows-1.3.1.zip'
+$zip = Join-Path $env:USERPROFILE 'Downloads/SnapBeauty-Windows-1.3.2.zip'
 Get-FileHash -Algorithm SHA256 -LiteralPath $zip
 Expand-Archive -LiteralPath $zip -DestinationPath .local/sdk
 ```
 
-本示例对应的 ZIP SHA-256 为 `efaca83344dbef544f300a29a1d4160a78b12f69c8af77905b2d1d614d865e92`。
+本示例对应 [SDK 1.3.2 ZIP](https://github.com/YunJuChuang-Tech/snapbeauty-windows-sdk/releases/download/1.3.2/SnapBeauty-Windows-1.3.2.zip)，SHA-256：`4a08093740637e3875224467f8a136f16bfb3ac2a71fdf9943eb2dd13c006208`。
 
 ### 2. 构建
 
 在 Visual Studio 的 **x64 Developer PowerShell** 中，从仓库根目录执行其中一条构建命令。`clang-cl` 需在 PATH 上。
 
 ```powershell
-$sdk = (Resolve-Path '.local/sdk/SnapBeauty-Windows-1.3.1').Path
+$sdk = (Resolve-Path '.local/sdk/SnapBeauty-Windows-1.3.2').Path
 .\windows\build.ps1 -SdkRoot $sdk -OutDir build/windows -Compiler clang-cl
 # 或使用 MSVC
 .\windows\build.ps1 -SdkRoot $sdk -OutDir build/windows -Compiler cl
