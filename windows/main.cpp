@@ -125,6 +125,12 @@ static bool CopyPixels(IMFSample* sample, int width, int height, LONG defaultStr
 
 static bool SetParameters(xm_desktop_engine* engine, bool makeup) {
     float values[XM_PARAM_COUNT] = {};
+    /* Neutral start: zero-filling is not "no effect". These twelve bidirectional face controls are neutral at 0.5;
+     * 0 pushes each one to an extreme and visibly reshapes the face. Everything else is neutral at 0. */
+    values[XM_PARAM_SHAPE_CHIN_LENGTH] = values[XM_PARAM_SHAPE_FOREHEAD_HEIGHT] = values[XM_PARAM_SHAPE_MOUTH_SIZE] = 0.5f;
+    values[XM_PARAM_SHAPE_LIP_FULLNESS] = values[XM_PARAM_SHAPE_EYE_POSITION] = values[XM_PARAM_SHAPE_EYE_DISTANCE] = 0.5f;
+    values[XM_PARAM_SHAPE_EYE_TILT] = values[XM_PARAM_SHAPE_NOSE_LENGTH] = values[XM_PARAM_SHAPE_PHILTRUM_LENGTH] = 0.5f;
+    values[XM_PARAM_SHAPE_BROW_POSITION] = values[XM_PARAM_SHAPE_BROW_DISTANCE] = values[XM_PARAM_SHAPE_BROW_THICKNESS] = 0.5f;
     values[XM_PARAM_SMOOTHING] = 4.2f;
     values[XM_PARAM_BRIGHTENING] = 0.3f;
     values[XM_PARAM_MAKEUP_INTENSITY] = makeup ? 0.8f : 0.0f;
