@@ -126,9 +126,9 @@ static bool CopyPixels(IMFSample* sample, int width, int height, LONG defaultStr
 static bool SetParameters(xm_desktop_engine* engine, bool makeup) {
     float values[XM_PARAM_COUNT];
     xm_params_neutral(values); // Neutral start: zero-filling would push the twelve bidirectional face controls (neutral 0.5) to one extreme.
-    values[XM_PARAM_SMOOTHING] = 4.2f;
-    values[XM_PARAM_BRIGHTENING] = 0.3f;
-    values[XM_PARAM_MAKEUP_INTENSITY] = makeup ? 0.8f : 0.0f;
+    values[XM_PARAM_SMOOTHING] = 3.6f;
+    values[XM_PARAM_BRIGHTENING] = 0.5f;
+    values[XM_PARAM_MAKEUP_INTENSITY] = makeup ? 0.6f : 0.0f;
     xm_params params = {sizeof(params), values, XM_PARAM_COUNT, makeup ? "dawn" : nullptr, nullptr};
     return xm_desktop_engine_set_params(engine, &params) == XM_OK;
 }
@@ -139,7 +139,7 @@ static void ShowStatus(Preview& preview, const wchar_t* message) {
 }
 
 static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_engine* engine) {
-    bool makeup = false;
+    bool makeup = preview.useMakeup;
     bool sdkReady = engine && SetParameters(engine, makeup);
     ShowStatus(preview, sdkReady ? L"Camera preview" : L"Camera preview | SDK unavailable");
     std::vector<uint8_t> input, output;
@@ -222,6 +222,7 @@ static void RunCamera(Preview& preview) {
         std::lock_guard<std::mutex> lock(preview.mutex);
         preview.makeupAvailable = engine && std::filesystem::is_regular_file(
             std::filesystem::path(assetPath) / L"makeup/lip/lip_01.json", error);
+        preview.useMakeup = preview.makeupAvailable;
     }
 
     {
