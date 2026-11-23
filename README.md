@@ -43,7 +43,7 @@ $sdk = (Resolve-Path '.local/sdk/SnapBeauty-Windows-1.3.2').Path
 
 输出目录包含 `snapbeauty-camera.exe`、`snapbeauty-minimal.exe`、运行所需的 `snapbeauty.dll` 和 `Assets/`。每次构建请指定新输出目录。
 
-需要演示「晨曦」时，先安装 Python 依赖，再加 `-WithMakeup`。启动对应输出目录里的相机程序后，在预览窗口按 `M` 切换。
+需要演示「晨曦」时，先安装 Python 依赖，再加 `-WithMakeup`。启动对应输出目录里的相机程序后，在预览窗口按 `M` 切换。按 `0` 关闭口红，按 `1`–`5` 选择珊瑚色、西柚色、豆沙粉、元气橘、复古红；按上下方向键调节所选色号强度。口红可独立使用，无需妆容素材。
 
 ```powershell
 python -m pip install Pillow numpy

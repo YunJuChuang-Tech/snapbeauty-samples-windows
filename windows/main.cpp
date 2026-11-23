@@ -8,6 +8,7 @@
 #include <mfreadwrite.h>
 #include <wrl.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -25,6 +26,10 @@ using Microsoft::WRL::ClassicCom;
 constexpr DWORD cameraStream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
 constexpr DWORD allStreams = static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS);
 
+static const float lipColors[6][4] = {{0,0,0,0}, {.611f,.352f,.352f,.500f}, {.752f,.267f,.231f,.543f},
+    {.713f,.374f,.409f,.517f}, {.786f,.326f,.252f,.629f}, {.476f,.018f,.025f,.777f}};
+static const wchar_t* lipNames[6] = {L"Off", L"Coral", L"Grapefruit", L"Rosewood", L"Tangerine", L"Vintage"};
+
 struct Preview {
     std::mutex mutex;
     std::condition_variable ready;
@@ -32,6 +37,8 @@ struct Preview {
     bool received = false;
     bool useMakeup = false;
     bool makeupAvailable = false;
+    int lipstick = 0;
+    int lipStrength[6] = {60, 60, 60, 60, 60, 60};
     HRESULT captureStatus = S_OK;
     DWORD captureFlags = 0;
     ComPtr<IMFSample> sample;
@@ -123,12 +130,17 @@ static bool CopyPixels(IMFSample* sample, int width, int height, LONG defaultStr
     return valid;
 }
 
-static bool SetParameters(xm_desktop_engine* engine, bool makeup) {
+static bool SetParameters(xm_desktop_engine* engine, bool makeup, int lipstick, int strength) {
     float values[XM_PARAM_COUNT];
     xm_params_neutral(values); // Neutral start: zero-filling would push the twelve bidirectional face controls (neutral 0.5) to one extreme.
     values[XM_PARAM_SMOOTHING] = 3.6f;
     values[XM_PARAM_BRIGHTENING] = 0.5f;
     values[XM_PARAM_MAKEUP_INTENSITY] = makeup ? 0.6f : 0.0f;
+    values[XM_PARAM_LIPSTICK_R] = lipColors[lipstick][0];
+    values[XM_PARAM_LIPSTICK_G] = lipColors[lipstick][1];
+    values[XM_PARAM_LIPSTICK_B] = lipColors[lipstick][2];
+    values[XM_PARAM_LIPSTICK_A] = lipColors[lipstick][3];
+    values[XM_PARAM_LIPSTICK_STRENGTH] = lipstick ? strength / 100.0f : 0.0f;
     xm_params params = {sizeof(params), values, XM_PARAM_COUNT, makeup ? "dawn" : nullptr, nullptr};
     return xm_desktop_engine_set_params(engine, &params) == XM_OK;
 }
@@ -140,13 +152,15 @@ static void ShowStatus(Preview& preview, const wchar_t* message) {
 
 static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_engine* engine) {
     bool makeup = preview.useMakeup;
-    bool sdkReady = engine && SetParameters(engine, makeup);
+    int lipstick = 0, strength = 60;
+    bool sdkReady = engine && SetParameters(engine, makeup, lipstick, strength);
     ShowStatus(preview, sdkReady ? L"Camera preview" : L"Camera preview | SDK unavailable");
     std::vector<uint8_t> input, output;
     for (;;) {
         if (FAILED(reader->ReadSample(cameraStream, 0, nullptr, nullptr, nullptr, nullptr))) break;
         ComPtr<IMFSample> sample;
         bool requestedMakeup;
+        int requestedLipstick, requestedStrength;
         {
             std::unique_lock<std::mutex> lock(preview.mutex);
             preview.ready.wait(lock, [&] { return preview.received || preview.closing; });
@@ -156,6 +170,7 @@ static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_
             sample = std::move(preview.sample);
             preview.received = false;
             requestedMakeup = preview.useMakeup;
+            requestedLipstick = preview.lipstick; requestedStrength = preview.lipStrength[requestedLipstick];
         }
         if (!sample) continue;
 
@@ -169,9 +184,10 @@ static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_
         else if (FAILED(MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.Data1, width, &pitch))) break;
         if (!CopyPixels(sample.Get(), (int)width, (int)height, pitch, input)) break;
 
-        if (engine && makeup != requestedMakeup) {
+        if (engine && (makeup != requestedMakeup || lipstick != requestedLipstick || strength != requestedStrength)) {
             makeup = requestedMakeup;
-            sdkReady = SetParameters(engine, makeup);
+            lipstick = requestedLipstick; strength = requestedStrength;
+            sdkReady = SetParameters(engine, makeup, lipstick, strength);
         }
         output.resize(input.size());
         int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -263,6 +279,12 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM key, LPARAM
             std::lock_guard<std::mutex> lock(preview->mutex);
             if (preview->makeupAvailable) preview->useMakeup = !preview->useMakeup;
         }
+        if (!(data & (1LL << 30))) {
+            std::lock_guard<std::mutex> lock(preview->mutex);
+            if (key >= '0' && key <= '5') preview->lipstick = (int)(key - '0');
+            if (key == VK_UP && preview->lipstick) preview->lipStrength[preview->lipstick] = std::min(100, preview->lipStrength[preview->lipstick] + 5);
+            if (key == VK_DOWN && preview->lipstick) preview->lipStrength[preview->lipstick] = std::max(0, preview->lipStrength[preview->lipstick] - 5);
+        }
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint;
@@ -288,6 +310,9 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM key, LPARAM
                               0, 0, preview->width, preview->height, preview->pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
             }
             TextOutW(dc, 8, client.bottom - 24, preview->message, (int)wcslen(preview->message));
+            wchar_t lipText[160];
+            swprintf_s(lipText, L"0-5 lipstick: %s %d%% (Up/Down)", lipNames[preview->lipstick], preview->lipStrength[preview->lipstick]);
+            TextOutW(dc, 8, 8, lipText, (int)wcslen(lipText));
             if (preview->makeupAvailable && !preview->pixels.empty()) {
                 const wchar_t* text = preview->useMakeup ? L"M: Dawn on" : L"M: Dawn off";
                 TextOutW(dc, 410, client.bottom - 24, text, (int)wcslen(text));
