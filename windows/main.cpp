@@ -37,8 +37,12 @@ struct Preview {
     bool received = false;
     bool useMakeup = false;
     bool makeupAvailable = false;
+    bool malePreset = false;
+    bool showOriginal = false;
+    bool panelVisible = true;
     int lipstick = 0;
     int lipStrength[6] = {60, 60, 60, 60, 60, 60};
+    RECT femaleRect = {}, maleRect = {}, compareRect = {}, toggleRect = {};
     HRESULT captureStatus = S_OK;
     DWORD captureFlags = 0;
     ComPtr<IMFSample> sample;
@@ -130,11 +134,42 @@ static bool CopyPixels(IMFSample* sample, int width, int height, LONG defaultStr
     return valid;
 }
 
-static bool SetParameters(xm_desktop_engine* engine, bool makeup, int lipstick, int strength) {
+static bool SetParameters(xm_desktop_engine* engine, bool malePreset, bool makeup, int lipstick, int strength) {
     float values[XM_PARAM_COUNT];
     xm_params_neutral(values); // Neutral start: zero-filling would push the twelve bidirectional face controls (neutral 0.5) to one extreme.
-    values[XM_PARAM_SMOOTHING] = 3.6f;
-    values[XM_PARAM_BRIGHTENING] = 0.5f;
+    if (malePreset) {
+        values[XM_PARAM_SMOOTHING] = 3.9f;
+        values[XM_PARAM_BRIGHTENING] = 0.38f;
+        values[XM_PARAM_ROSINESS] = 0.12f;
+        values[XM_PARAM_SHAPE_FACE_SLIMMING] = 0.24f;
+        values[XM_PARAM_SHAPE_FACE_V_TAPER] = 0.16f;
+        values[XM_PARAM_SHAPE_FACE_SHRINKING] = 0.15f;
+        values[XM_PARAM_SHAPE_EYE_SCALE] = 0.18f;
+        values[XM_PARAM_SHAPE_NOSE_WIDTH] = 0.14f;
+        values[XM_PARAM_SKIN_SHARPNESS] = 0.22f;
+        values[XM_PARAM_SKIN_TEXTURE] = 0.06f;
+        values[XM_PARAM_SKIN_BLEMISH_REMOVAL] = 0.48f;
+        values[XM_PARAM_SKIN_EYE_BRIGHTENING] = 0.28f;
+        values[XM_PARAM_SKIN_UNDEREYE_BAGS] = 0.55f;
+        values[XM_PARAM_SKIN_SMILE_LINES] = 0.35f;
+        values[XM_PARAM_SKIN_FACE_CONTOUR] = 0.18f;
+#if XM_PARAM_COUNT >= 46
+        values[XM_PARAM_SKIN_AEGYO_SAL] = 0.25f;
+#endif
+    } else {
+        values[XM_PARAM_SMOOTHING] = 3.6f;
+        values[XM_PARAM_BRIGHTENING] = 0.48f;
+        values[XM_PARAM_ROSINESS] = 0.10f;
+        values[XM_PARAM_SKIN_TEXTURE] = 0.12f;
+        values[XM_PARAM_SKIN_BLEMISH_REMOVAL] = 0.38f;
+        values[XM_PARAM_SKIN_EYE_BRIGHTENING] = 0.28f;
+        values[XM_PARAM_SKIN_UNDEREYE_BAGS] = 0.45f;
+        values[XM_PARAM_SKIN_SMILE_LINES] = 0.35f;
+        values[XM_PARAM_SKIN_FACE_CONTOUR] = 0.28f;
+#if XM_PARAM_COUNT >= 46
+        values[XM_PARAM_SKIN_AEGYO_SAL] = 0.58f;
+#endif
+    }
     values[XM_PARAM_MAKEUP_INTENSITY] = makeup ? 0.6f : 0.0f;
     values[XM_PARAM_LIPSTICK_R] = lipColors[lipstick][0];
     values[XM_PARAM_LIPSTICK_G] = lipColors[lipstick][1];
@@ -145,6 +180,18 @@ static bool SetParameters(xm_desktop_engine* engine, bool makeup, int lipstick, 
     return xm_desktop_engine_set_params(engine, &params) == XM_OK;
 }
 
+static void ApplyGenderPreset(Preview& preview, bool male) {
+    preview.malePreset = male;
+    if (male) {
+        preview.useMakeup = false;
+        preview.lipstick = 1;
+        preview.lipStrength[1] = 26;
+    } else {
+        preview.useMakeup = preview.makeupAvailable;
+        preview.lipstick = 0;
+    }
+}
+
 static void ShowStatus(Preview& preview, const wchar_t* message) {
     std::lock_guard<std::mutex> lock(preview.mutex);
     preview.message = message;
@@ -152,14 +199,15 @@ static void ShowStatus(Preview& preview, const wchar_t* message) {
 
 static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_engine* engine) {
     bool makeup = preview.useMakeup;
-    int lipstick = 0, strength = 60;
-    bool sdkReady = engine && SetParameters(engine, makeup, lipstick, strength);
+    bool malePreset = preview.malePreset;
+    int lipstick = preview.lipstick, strength = preview.lipStrength[lipstick];
+    bool sdkReady = engine && SetParameters(engine, malePreset, makeup, lipstick, strength);
     ShowStatus(preview, sdkReady ? L"Camera preview" : L"Camera preview | SDK unavailable");
     std::vector<uint8_t> input, output;
     for (;;) {
         if (FAILED(reader->ReadSample(cameraStream, 0, nullptr, nullptr, nullptr, nullptr))) break;
         ComPtr<IMFSample> sample;
-        bool requestedMakeup;
+        bool requestedMakeup, requestedMale, showOriginal;
         int requestedLipstick, requestedStrength;
         {
             std::unique_lock<std::mutex> lock(preview.mutex);
@@ -170,6 +218,8 @@ static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_
             sample = std::move(preview.sample);
             preview.received = false;
             requestedMakeup = preview.useMakeup;
+            requestedMale = preview.malePreset;
+            showOriginal = preview.showOriginal;
             requestedLipstick = preview.lipstick; requestedStrength = preview.lipStrength[requestedLipstick];
         }
         if (!sample) continue;
@@ -184,17 +234,17 @@ static void CaptureFrames(Preview& preview, IMFSourceReader* reader, xm_desktop_
         else if (FAILED(MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.Data1, width, &pitch))) break;
         if (!CopyPixels(sample.Get(), (int)width, (int)height, pitch, input)) break;
 
-        if (engine && (makeup != requestedMakeup || lipstick != requestedLipstick || strength != requestedStrength)) {
-            makeup = requestedMakeup;
+        if (engine && (malePreset != requestedMale || makeup != requestedMakeup || lipstick != requestedLipstick || strength != requestedStrength)) {
+            malePreset = requestedMale; makeup = requestedMakeup;
             lipstick = requestedLipstick; strength = requestedStrength;
-            sdkReady = SetParameters(engine, makeup, lipstick, strength);
+            sdkReady = SetParameters(engine, malePreset, makeup, lipstick, strength);
         }
         output.resize(input.size());
         int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         xm_desktop_frame frame = {sizeof(frame), input.data(), (int)width, (int)height, (int)width * 4,
                                   XM_PIXEL_BGRA8, timestamp, output.data(), (int)width * 4};
-        bool processed = sdkReady && xm_desktop_process(engine, &frame, nullptr) == XM_OK;
+        bool processed = !showOriginal && sdkReady && xm_desktop_process(engine, &frame, nullptr) == XM_OK;
         {
             std::lock_guard<std::mutex> lock(preview.mutex);
             preview.pixels.swap(processed ? output : input);
@@ -275,17 +325,37 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM key, LPARAM
         InvalidateRect(window, nullptr, FALSE);
         return 0;
     case WM_KEYDOWN:
-        if (key == 'M' && !(data & (1LL << 30))) {
-            std::lock_guard<std::mutex> lock(preview->mutex);
-            if (preview->makeupAvailable) preview->useMakeup = !preview->useMakeup;
-        }
         if (!(data & (1LL << 30))) {
             std::lock_guard<std::mutex> lock(preview->mutex);
+            if (key == 'M' && preview->makeupAvailable) preview->useMakeup = !preview->useMakeup;
+            if (key == 'G') ApplyGenderPreset(*preview, !preview->malePreset);
+            if (key == 'H') preview->panelVisible = !preview->panelVisible;
+            if (key == VK_SPACE) preview->showOriginal = true;
             if (key >= '0' && key <= '5') preview->lipstick = (int)(key - '0');
             if (key == VK_UP && preview->lipstick) preview->lipStrength[preview->lipstick] = std::min(100, preview->lipStrength[preview->lipstick] + 5);
             if (key == VK_DOWN && preview->lipstick) preview->lipStrength[preview->lipstick] = std::max(0, preview->lipStrength[preview->lipstick] - 5);
         }
         return 0;
+    case WM_KEYUP:
+        if (key == VK_SPACE) {
+            std::lock_guard<std::mutex> lock(preview->mutex);
+            preview->showOriginal = false;
+        }
+        return 0;
+    case WM_LBUTTONDOWN: {
+        POINT pt = {(short)LOWORD(data), (short)HIWORD(data)};
+        std::lock_guard<std::mutex> lock(preview->mutex);
+        if (PtInRect(&preview->femaleRect, pt)) ApplyGenderPreset(*preview, false);
+        else if (PtInRect(&preview->maleRect, pt)) ApplyGenderPreset(*preview, true);
+        else if (PtInRect(&preview->compareRect, pt)) preview->showOriginal = true;
+        else preview->panelVisible = !preview->panelVisible;
+        return 0;
+    }
+    case WM_LBUTTONUP: {
+        std::lock_guard<std::mutex> lock(preview->mutex);
+        preview->showOriginal = false;
+        return 0;
+    }
     case WM_PAINT: {
         PAINTSTRUCT paint;
         HDC dc = BeginPaint(window, &paint);
@@ -293,11 +363,21 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM key, LPARAM
         GetClientRect(window, &client);
         FillRect(dc, &client, (HBRUSH)GetStockObject(BLACK_BRUSH));
         SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(255, 255, 255));
+        auto drawPill = [&](const RECT& r, COLORREF bg, COLORREF fg, const wchar_t* txt) {
+            HBRUSH br = CreateSolidBrush(bg);
+            HPEN pen = CreatePen(PS_SOLID, 1, bg);
+            HGDIOBJ oldB = SelectObject(dc, br), oldP = SelectObject(dc, pen);
+            RoundRect(dc, r.left, r.top, r.right, r.bottom, 16, 16);
+            SelectObject(dc, oldB); SelectObject(dc, oldP);
+            DeleteObject(br); DeleteObject(pen);
+            SetTextColor(dc, fg);
+            RECT tr = r;
+            DrawTextW(dc, txt, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        };
         {
             std::lock_guard<std::mutex> lock(preview->mutex);
-            if (!preview->pixels.empty() && client.right > 0 && client.bottom > 30) {
-                int width = client.right, height = client.bottom - 30;
+            if (!preview->pixels.empty() && client.right > 0 && client.bottom > 0) {
+                int width = client.right, height = client.bottom;
                 if (width * preview->height > height * preview->width) width = height * preview->width / preview->height;
                 else height = width * preview->height / preview->width;
                 BITMAPINFO bitmap = {};
@@ -306,16 +386,29 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM key, LPARAM
                 bitmap.bmiHeader.biHeight = -preview->height;
                 bitmap.bmiHeader.biPlanes = 1;
                 bitmap.bmiHeader.biBitCount = 32;
-                StretchDIBits(dc, (client.right - width) / 2, (client.bottom - 30 - height) / 2, width, height,
+                StretchDIBits(dc, (client.right - width) / 2, (client.bottom - height) / 2, width, height,
                               0, 0, preview->width, preview->height, preview->pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
             }
-            TextOutW(dc, 8, client.bottom - 24, preview->message, (int)wcslen(preview->message));
-            wchar_t lipText[160];
-            swprintf_s(lipText, L"0-5 lipstick: %s %d%% (Up/Down)", lipNames[preview->lipstick], preview->lipStrength[preview->lipstick]);
-            TextOutW(dc, 8, 8, lipText, (int)wcslen(lipText));
-            if (preview->makeupAvailable && !preview->pixels.empty()) {
-                const wchar_t* text = preview->useMakeup ? L"M: Dawn on" : L"M: Dawn off";
-                TextOutW(dc, 410, client.bottom - 24, text, (int)wcslen(text));
+            const COLORREF darkBg = RGB(20, 24, 21), accentBg = RGB(221, 255, 154), lightFg = RGB(242, 244, 236), darkFg = RGB(16, 19, 17);
+            RECT statusR = {12, 12, 230, 38};
+            drawPill(statusR, darkBg, lightFg, preview->showOriginal ? L"Showing Original" : preview->message);
+
+            preview->maleRect = {client.right - 74, 12, client.right - 12, 38};
+            preview->femaleRect = {client.right - 140, 12, client.right - 78, 38};
+            drawPill(preview->femaleRect, !preview->malePreset ? accentBg : darkBg, !preview->malePreset ? darkFg : lightFg, L"\u5973\u751f");
+            drawPill(preview->maleRect, preview->malePreset ? accentBg : darkBg, preview->malePreset ? darkFg : lightFg, L"\u7537\u751f");
+
+            preview->compareRect = {client.right - 118, client.bottom - (preview->panelVisible ? 84 : 40), client.right - 12, client.bottom - (preview->panelVisible ? 56 : 12)};
+            drawPill(preview->compareRect, accentBg, darkFg, preview->showOriginal ? L"\u6b63\u5728\u67e5\u770b\u539f\u56fe" : L"\u6309\u4f4f\u5bf9\u6bd4\u539f\u56fe");
+
+            if (preview->panelVisible) {
+                RECT bar = {12, client.bottom - 48, client.right - 12, client.bottom - 10};
+                wchar_t barText[220];
+                swprintf_s(barText, L"G: %s | M: %s | 0-5 Lip: %s %d%% (Up/Down) | H/Click: Hide",
+                           preview->malePreset ? L"Male" : L"Female",
+                           preview->useMakeup ? L"Dawn On" : L"Makeup Off",
+                           lipNames[preview->lipstick], preview->lipStrength[preview->lipstick]);
+                drawPill(bar, darkBg, lightFg, barText);
             }
         }
         EndPaint(window, &paint);
