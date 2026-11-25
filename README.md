@@ -28,7 +28,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath $zip
 Expand-Archive -LiteralPath $zip -DestinationPath .local/sdk
 ```
 
-本示例对应 [SDK 1.3.6 ZIP](https://github.com/YunJuChuang-Tech/snapbeauty-windows-sdk/releases/download/1.3.6/SnapBeauty-Windows-1.3.6.zip)，SHA-256：`d9d2d21eddba3677ab0de91eb7832feb5d17123e9d89b461ad692beffec53f4e`。
+本示例对应 [SDK 1.3.6 ZIP](https://github.com/YunJuChuang-Tech/snapbeauty-windows-sdk/releases/download/1.3.6/SnapBeauty-Windows-1.3.6.zip)，SHA-256：`af9b7fe4d80e8b61158a738f4087c08ce6650b9da37a92672a3e4129bf2633fd`。
 
 ### 2. 构建
 
